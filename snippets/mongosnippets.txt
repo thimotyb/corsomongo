@@ -364,6 +364,118 @@ db.companies.aggregate([
 
 ============================
 
+CREATE LOCAL REPLICA SET
+
+tmux
+https://tmuxcheatsheet.com/
+
+mkdir -p ~/data/rs{1,2,3}
+sudo mongod --replSet rsExample --dbpath ~/data/rs1 --port 27017 --oplogSize 200
+sudo mongod --replSet rsExample --dbpath ~/data/rs2 --port 27018 --oplogSize 200
+sudo mongod --replSet rsExample --dbpath ~/data/rs3 --port 27019 --oplogSize 200
+mongosh --port 27017
+
+rsconf = {
+    _id: "rsExample",
+    members: [
+      {_id: 0, host: "localhost:27017"},
+      {_id: 1, host: "localhost:27018"},
+      {_id: 2, host: "localhost:27019"} 
+    ]
+  }
+
+rs.initiate(rsconf)
+rs.status()
+
+# Preferred Read and Write on Primaries
+use test
+for (i=0; i<1000; i++) {db.coll.insertOne({count: i})}
+// make sure the docs are there
+db.coll.countDocuments()
+db.isMaster()
+secondaryConn = new Mongo("localhost:27019")
+secondaryDB = secondaryConn.getDB("test")
+secondaryDB.coll.find() # this gives an error
+# MongoServerError: not primary and secondaryOk=false - consider using db.getMongo().setReadPref() or readPreference in the connection string
+secondaryConn.setReadPref('secondary')
+secondaryDB.coll.insert({"count" : 1001}) # Error: can write only on primaries
+
+# Automatic Failover
+db.adminCommand({"shutdown" : 1}) # shutdown primary
+secondaryDB.isMaster() # look at .primary and .me attributes
+# restart ex-primary
+
+rs.printReplicationInfo()
+rs.printSecondaryReplicationInfo()
+
+===============================
+
+SINGLE NODE SHARD CREATION
+
+https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/
+
+mkdir -p ~/data/cfg{1,2,3}
+mkdir -p ~/data/db{1,2,3}
+
+sudo mongod --configsvr --replSet myReplSet --dbpath ~/data/cfg1 --port 27020
+sudo mongod --configsvr --replSet myReplSet --dbpath ~/data/cfg2 --port 27021
+sudo mongod --configsvr --replSet myReplSet --dbpath ~/data/cfg3 --port 27022
+
+mongosh --port 27020
+
+rs.initiate(
+  {
+    _id: "myReplSet",
+    configsvr: true,
+    members: [
+      { _id : 0, host : "localhost:27020" },
+      { _id : 1, host : "localhost:27021" },
+      { _id : 2, host : "localhost:27022" }
+    ]
+  }
+)
+
+sudo mongod --shardsvr --replSet myReplShard  --dbpath ~/data/db1 --port 27017
+sudo mongod --shardsvr --replSet myReplShard  --dbpath ~/data/db2 --port 27018
+sudo mongod --shardsvr --replSet myReplShard  --dbpath ~/data/db3 --port 27019
+
+mongosh --port 27017
+
+rs.initiate(
+  {
+    _id : "myReplShard",
+    members: [
+      { _id : 0, host : "localhost:27017" },
+      { _id : 1, host : "localhost:27018" },
+      { _id : 2, host : "localhost:27019" }
+    ]
+  }
+)
+
+# start mongos router
+sudo mongos --configdb myReplSet/localhost:27020,localhost:27021,localhost:27022 --port 27023
+# connect to the shard router
+mongosh --port 27023
+
+# Operate on mongos mongo shell
+sh.addShard( "myReplShard/localhost:27017,localhost:27018,localhost:27019")
+
+# Shard a collection based on Hash or Range
+#sh.shardCollection("<database>.<collection>", { <shard key field> : "hashed" } )
+#sh.shardCollection("<database>.<collection>", { <shard key field> : 1, ... } )
+
+use accounts
+for (var i=0; i<100000; i++) {
+     db.users.insertOne({"username" : "user"+i, "created_at" : new Date()});
+}
+db.users.findOne({username: 'user50000'})
+db.users.countDocuments()
+sh.status() # coll accounts not sharded yet
+sh.enableSharding("accounts")
+db.users.createIndex({"username" : 1})
+sh.shardCollection("accounts.users", {"username" : 1})
+sh.status()
+
 
 
 
