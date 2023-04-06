@@ -1,0 +1,369 @@
+MongoDB
+===========
+
+
+Install on Ubuntu
+https://www.mongodb.com/docs/manual/tutorial/install-mongodb-on-ubuntu/
+
+cat /etc/issue
+wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+sudo apt-get update
+sudo apt-get install -y mongodb-org
+
+sudo mkdir /data
+sudo mkdir /data/db
+
+On WSL2 cannot start as service:
+sudo mongod&
+
+======================
+
+mkdir mongodb
+cd mongodb
+git clone https://github.com/thimotyb/mongodb-sample-dataset.git
+mongoimport --drop --host localhost --port 27017 --db "sample_mflix" --collection movies --file sample_mflix/movies.json
+mongoimport --drop --host localhost --port 27017 --db "sample_training" --collection companies --file sample_training/companies.json
+
+
+========================
+ACCESSING A COLLECTION / DOCUMENT
+
+mongosh
+show dbs
+use sample_mflix
+show collections
+db.movies.findOne();
+
+============================
+Using like:
+db.movies.find({ title: /Indiana Jones/}, {title: 1});
+db.movies.find({title: "Indiana Jones and the Last Crusade"});
+db.movies.updateOne({title: "Indiana Jones and the Last Crusade"}, {$set: {favorite: "yes"}});
+
+Cursor:
+for(i=0; i<100; i++) {
+ db.mytest.insertOne({x : i});
+}
+var cursor = db.mytest.find();
+
+cursor.forEach(function(j) {
+    print(j.x*2);
+ });
+ 
+=====================
+
+INDEXES
+
+for (i=0; i<1000000; i++) {
+     db.users.insertOne(
+         {
+              "i" : i, 
+              "username" : "user"+i,
+              "age" : Math.floor(Math.random()*120), 
+              "created" : new Date()
+         }
+     );
+ }
+
+db.users.find({"username": "user101"}).explain("executionStats")
+db.users.find({"username": "user999999"}).explain("executionStats")
+db.users.createIndex({"username" : 1})
+db.users.find({"username": "user101"}).explain("executionStats")
+db.users.find({"username": "user999999"}).explain("executionStats")
+db.users.find().sort({"age" : 1, "username" : 1}) # Needs a compound index to workd
+db.users.createIndex({"age" : 1, "username" : 1})
+db.users.createIndex({"username" : 1, "age": 1})
+db.users.find({}, {"_id" : 0, "i" : 0, "created" : 0})
+
+db.users.find({"age" : {"$gte" : 21, "$lte" : 30}}).explain("executionStats") # uses the age key in the second index
+db.users.find({"age" : {"$gte" : 21, "$lte" : 30}}).sort({"username" : 1}).explain("executionStats") # uses compound and then single index on username
+
+db.users.find({"age" : {$gt : 10}, "username" : "user2134"}).explain() # uses username_1_age_1
+db.users.find({"age" : 14, "username" : /.*/}).explain() # uses age_1_username_1
+
+db.users.getIndexes()
+db.users.dropIndex("username_1")
+
+========================
+GEOSPATIAL QUERIES
+(on Atlas)
+use sample_restaurants
+db.neighborhoods.createIndex({geometry:"2dsphere"})
+db.restaurants.createIndex({'address.coord':"2dsphere"})
+
+db.neighborhoods.find({name: "Clinton"})
+db.restaurants.find({name: "Little Pie Company"})
+db.neighborhoods.findOne({geometry:{$geoIntersects:{$geometry:{type:"Point", coordinates:[-73.93414657,40.82302903]}}}})
+
+var neighborhood = db.neighborhoods.findOne({
+  geometry: {
+    $geoIntersects: {
+      $geometry: {
+        type: "Point",
+        coordinates: [-74.013222,40.70122]
+      }
+    }
+  }
+});
+
+# Battery Park City-Lower Manhattan'
+db.restaurants.find({'address.coord': {$geoWithin: { $centerSphere: [ [ -74.00972425205318, 40.70867294227663 ], 0.00018213153257553877 ]}}})
+
+db.restaurants.find({
+    'address.coord': {
+      $geoWithin: {
+        // Use the geometry from the neighborhood object we retrieved above
+        $geometry: neighborhood.geometry
+      }
+    }
+  },
+  // Project just the name of each matching restaurant
+  {name: 1, _id: 0});
+  
+// NEAR SPHERE
+var METERS_PER_MILE = 1609.34;
+db.restaurants.find({
+  'address.coord': {
+    $nearSphere: {
+      $geometry: {
+        type: "Point",
+        coordinates: [-73.93414657,40.82302903]
+      },
+      $maxDistance: 5*METERS_PER_MILE
+    }
+  }
+});
+
+// FULL TEXT SEARCH
+
+db.movies.getIndices();
+db.movies.find({"$text": {"$search": "impact crater lunar"}}, {title:1}).limit(10)
+db.movies.find({"$text": {"$search": "\impact crater\ lunar"}}, {title:1}).limit(10)
+db.movies.find({"$text": {"$search": "\impact crater\ lunar"}}, {title:1, score: {$meta: "textScore"}}).sort({score: {$meta: "textScore"}}).limit(10)
+
+// CAPPED COLLECTIONS
+db.createCollection("my_collection", {"capped" : true, "size" : 100000});
+// TTL INDEXES
+// 24-hour timeout
+db.sessions.createIndex({"lastUpdated" : 1}, {"expireAfterSeconds" : 60*60*24})
+
+/////////////////////////
+// AGGREGATION FW (on Atlas)
+/////////////////////////
+use sample_training
+db.companies.findOne({"name": "Facebook"})
+db.companies.aggregate([ {$match: {founded_year: 2004}}, ]) # same as db.companies.find({founded_year: 2004})
+
+db.companies.aggregate([
+  {$match: {founded_year: 2004}},
+  {$project: {
+    _id: 0,
+    name: 1,
+    founded_year: 1
+  }}
+])
+
+db.companies.aggregate([
+  {$match: {founded_year: 2004}},
+  {$limit: 5},
+  {$project: {
+    _id: 0,
+    name: 1}}
+])
+
+db.companies.aggregate([
+    { $match: { founded_year: 2004 } },
+    { $sort: { name: 1} },
+    { $limit: 5 },
+    { $project: {
+        _id: 0,
+        name: 1 } }
+])
+
+db.companies.aggregate([
+  {$match: {founded_year: 2004}},
+  {$sort: {name: 1}},
+  {$skip: 10},
+  {$limit: 5},
+  {$project: {
+    _id: 0,
+    name: 1}},
+])
+
+db.companies.aggregate([
+  {$match: {"funding_rounds.investments.financial_org.permalink": "greylock" }},
+  {$project: {
+    _id: 0, 
+    name: 1,
+    ipo: "$ipo.pub_year",
+    valuation: "$ipo.valuation_amount",
+    funders: "$funding_rounds.investments.financial_org.permalink"
+  }}
+]).pretty()
+
+ // UNWIND
+ db.companies.aggregate([
+  {$match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  {$project: {
+    _id: 0,
+    name: 1,
+    amount: "$funding_rounds.raised_amount",
+    year: "$funding_rounds.funded_year"
+  }}
+])
+
+db.companies.aggregate([
+  { $match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  { $unwind: "$funding_rounds" },
+  { $project: {
+    _id: 0,
+    name: 1,
+    amount: "$funding_rounds.raised_amount",
+    year: "$funding_rounds.funded_year"
+  } }
+])
+ 
+# financial org needs to be filtered
+db.companies.aggregate([
+  { $match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  { $unwind: "$funding_rounds" },
+  { $project: {
+    _id: 0,
+    name: 1,
+    funder: "$funding_rounds.investments.financial_org.permalink",
+    amount: "$funding_rounds.raised_amount",
+    year: "$funding_rounds.funded_year"
+  } }
+])
+
+# Match after unwind to solve the problem
+db.companies.aggregate([
+  { $match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  { $unwind: "$funding_rounds" },
+  { $match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  { $project: {
+    _id: 0,
+    name: 1,
+    individualFunder: "$funding_rounds.investments.person.permalink",
+    fundingOrganization: "$funding_rounds.investments.financial_org.permalink",
+    amount: "$funding_rounds.raised_amount",
+    year: "$funding_rounds.funded_year"
+  } }
+])
+
+# Array expressions - Filtering
+db.companies.aggregate([
+  { $match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  { $project: {
+    _id: 0,
+    name: 1,
+    founded_year: 1,
+    rounds: { $filter: {
+      input: "$funding_rounds",
+      as: "round",
+      cond: { $gte: ["$$round.raised_amount", 100000000] } } }
+  } },
+  { $match: {"rounds.investments.financial_org.permalink": "greylock" } },
+]).pretty()
+
+# position ElemAt, Slice
+db.companies.aggregate([
+  { $match: { "founded_year": 2010 } },
+  { $project: {
+    _id: 0,
+    name: 1,
+    founded_year: 1,
+    first_round: { $arrayElemAt: [ "$funding_rounds", 0 ] },
+    last_round: { $arrayElemAt: [ "$funding_rounds", -1 ] }
+  } },
+  { $limit: 1}
+]).pretty()
+
+db.companies.aggregate([
+  { $match: { "founded_year": 2010 } },
+  { $project: {
+    _id: 0,
+    name: 1,
+    founded_year: 1,
+    early_rounds: { $slice: [ "$funding_rounds", 1, 3 ] }
+  } },
+  { $limit: 1}
+]).pretty()
+
+# ACCUMULATORS
+db.companies.aggregate([
+  { $match: { "funding_rounds": { $exists: true, $ne: [ ]} } },
+  { $project: {
+    _id: 0,
+    name: 1,
+    largest_round: { $max: "$funding_rounds.raised_amount" }
+  } }
+])
+
+db.companies.aggregate([
+  { $match: { "funding_rounds": { $exists: true, $ne: [ ]} } },
+  { $project: {
+    _id: 0,
+    name: 1,
+    total_funding: { $sum: "$funding_rounds.raised_amount" }
+  } }
+])
+
+# GROUPING
+db.companies.aggregate([
+  { $group: {
+    _id: { founded_year: "$founded_year" },
+    average_number_of_employees: { $avg: "$number_of_employees" }
+  } },
+  { $sort: { average_number_of_employees: -1 } }
+
+])
+
+db.companies.aggregate( [
+  { $match: { "relationships.person": { $ne: null } } },
+  { $project: { relationships: 1, _id: 0 } },
+  { $unwind: "$relationships" },
+  { $group: {
+    _id: "$relationships.person",
+    count: { $sum: 1 }
+  } },
+  { $sort: { count: -1 } }
+]).pretty()
+
+# Using ID in Grouping
+db.companies.aggregate([
+  { $match: { founded_year: { $gte: 2010 } } },
+  { $group: {
+    _id: { founded_year: "$founded_year"},
+    companies: { $push: "$name" }
+  } },
+  { $sort: { "_id.founded_year": 1 } }
+]).pretty()
+
+# Multiple fields in ID
+db.companies.aggregate([
+  { $match: { founded_year: { $gte: 2010 } } },
+  { $group: {
+    _id: { founded_year: "$founded_year", category_code: "$category_code" },
+    companies: { $push: "$name" }
+  } },
+  { $sort: { "_id.founded_year": 1 } }
+]).pretty()
+
+# Composite ID used in following stages
+db.companies.aggregate([
+  { $group: {
+    _id: { ipo_year: "$ipo.pub_year" },
+    companies: { $push: "$name" }
+  } },
+  { $sort: { "_id.ipo_year": 1 } }
+]).pretty()
+
+# Writing aggregation results 
+
+============================
+
+
+
+
