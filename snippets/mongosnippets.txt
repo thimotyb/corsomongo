@@ -471,7 +471,7 @@ for (var i=0; i<100000; i++) {
 db.users.findOne({username: 'user50000'})
 db.users.countDocuments()
 sh.status() # coll accounts not sharded yet (see: partitioned)
-sh.enableSharding("accounts")
+sh.enableSharding("accounts") # No longer needed since Mongo 6.0
 db.users.createIndex({"username" : 1})
 sh.shardCollection("accounts.users", {"username" : 1}, false,
   {
@@ -486,3 +486,19 @@ sh.status()
 
 db.users.find({username: "user12345"}}).explain() # SINGLE SHARD QUERY PLAN
 
+# Modify chunksize (experimental)
+use config
+db.settings.updateOne(
+   { _id: "chunksize" },
+   { $set: { _id: "chunksize", value: <sizeInMB> } },
+   { upsert: true }
+)
+
+
+db.settings.updateOne(
+   { _id: "chunksize" },
+   { $set: { _id: "chunksize", value: 1 } },
+   { upsert: true }
+)
+
+db.adminCommand( { balancerCollectionStatus: "accounts.users" } )
