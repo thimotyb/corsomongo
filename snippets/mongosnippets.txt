@@ -1,13 +1,24 @@
 MongoDB
 ===========
 
+Link Cartella Condivisa: https://docs.google.com/spreadsheets/d/1Ry-SryhwgquXXM8-fv19ADAv2xZ3ZqqB/edit?usp=share_link&ouid=100113145437900182221&rtpof=true&sd=true
+Keys:
+https://drive.google.com/file/d/1hCh26Kz7TTgOoi9CzWKCy-ILhBPabD2Q/view?usp=share_link
+
 
 Install on Ubuntu
+
+sudo apt update
+sudo apt install openjdk-8-jdk
+java -version
+sudo apt install maven
+mvn -v
+
+
 https://www.mongodb.com/docs/manual/tutorial/install-mongodb-on-ubuntu/
 
 cat /etc/issue
-wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
-echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
 sudo apt-get update
 sudo apt-get install -y mongodb-org
 
@@ -19,9 +30,11 @@ sudo mongod&
 
 ======================
 
+cd /home/azureuser
 mkdir mongodb
 cd mongodb
 git clone https://github.com/thimotyb/mongodb-sample-dataset.git
+cd mongodb-sample-dataset
 mongoimport --drop --host localhost --port 27017 --db "sample_mflix" --collection movies --file sample_mflix/movies.json
 mongoimport --drop --host localhost --port 27017 --db "sample_training" --collection companies --file sample_training/companies.json
 
@@ -40,6 +53,175 @@ Using like:
 db.movies.find({ title: /Indiana Jones/}, {title: 1});
 db.movies.find({title: "Indiana Jones and the Last Crusade"});
 db.movies.updateOne({title: "Indiana Jones and the Last Crusade"}, {$set: {favorite: "yes"}});
+
+========
+
+movie = {"title" : "Star Wars: Episode IV - A New Hope",
+ "director" : "George Lucas",
+ "year" : 1977}
+
+db.movies.insertOne(movie)
+db.movies.find({ "title": "Star Wars: Episode IV - A New Hope"  });
+
+db.movies.updateOne({ "title": "Star Wars: Episode IV - A New Hope"  }, { $set : { reviews: [ ] } } );
+db.movies.deleteOne( { _id: ObjectId("6435245a8d425b6f1b65e86f")  } );  # Change _id
+
+db.mymovies.insertOne({"title" : "Stand by Me"})
+
+db.mymovies.insertMany([{"title" : "Ghostbusters"},
+                        {"title" : "E.T."},
+                        {"title" : "Blade Runner"}]);
+
+
+===========================
+
+Orered and Unordered Bulk Inserts
+
+# Ordered Insert (does not complete on error)
+db.mymovies.insertMany([
+     {"_id" : 0, "title" : "Top Gun"},
+     {"_id" : 1, "title" : "Back to the Future"},
+     {"_id" : 1, "title" : "Gremlins"},
+     {"_id" : 2, "title" : "Aliens"}])
+
+# Unordered Insert (completes all valid records)
+db.mymovies.insertMany([
+ {"_id" : 3, "title" : "Sixteen Candles"},
+ {"_id" : 4, "title" : "The Terminator"},
+ {"_id" : 4, "title" : "The Princess Bride"},
+ {"_id" : 5, "title" : "Scarface"}],
+ {"ordered" : false})
+
+# Deletes all documents!
+db.mymovies.deleteMany({})
+# Drop the entire collection
+db.mymovies.drop()
+
+===========================
+
+REPLACE / UPDATEONE-UPDATEMANY / UPSERT
+
+### Replace
+
+person = {
+    "_id" : ObjectId("4b2b9f67a1f631733d917a7a"),
+    "name" : "joe",
+    "friends" : 32,
+    "enemies" : 2
+}
+db.users.insertOne(person)
+
+var joe = db.users.findOne({ "name": "joe"  })
+joe.relationships = {"friends" : joe.friends, "enemies" : joe.enemies};
+joe.username = joe.name
+delete joe.name
+delete joe.enemies
+delete joe.friends
+# In the db still the old users structure, in var joe in memory, the new structure --> use replace to restructure using the new object
+db.users.replaceOne({"name" : "joe"}, joe);
+
+# What if we are working on multiple documents?
+db.users.insertOne({"_id" : ObjectId("4b2b9f67a1f631733d917a7b"), "name" : "joe", "age" : 65})
+db.users.insertOne({"_id" : ObjectId("4b2b9f67a1f631733d917a7c"), "name" : "joe", "age" : 20})
+db.users.insertOne({"_id" : ObjectId("4b2b9f67a1f631733d917a7d"), "name" : "joe", "age" : 49})
+
+joe = db.users.findOne({"name" : "joe", "age" : 20});
+joe.age = joe.age+1
+
+ db.users.replaceOne({"name":"joe"}, joe);
+ db.people.replaceOne({"_id" : ObjectId("4b2b9f67a1f631733d917a7c")}, joe)
+
+
+### Update operators:
+
+pageview = {
+    "_id" : ObjectId("4b253b067525f35f94b60a31"),
+    "url" : "www.example.com",
+    "pageviews" : 52
+}
+
+db.analytics.insertOne(pageview)
+
+# Using increment atomic operator in update
+db.analytics.updateOne({"url" : "www.example.com"}, {"$inc" : {"pageviews" : 1}})
+
+# Showing update features for adding subdocuments
+db.users.drop()
+var user = {
+    "_id" : ObjectId("4b253b067525f35f94b60a31"),
+    "name" : "joe",
+    "age" : 30,
+    "sex" : "male",
+    "location" : "Wisconsin"
+}
+db.users.insertOne(user)
+
+db.users.updateOne({"_id" : ObjectId("4b253b067525f35f94b60a31")}, {"$set" : {"favorite book" : "War and Peace"}})
+db.users.updateOne({"name" : "joe"}, {"$set" : {"favorite book" : "Green Eggs and Ham"}})
+
+db.users.updateOne({"name" : "joe"}, {"$set" : {"favorite book" : ["Cat's Cradle", "Foundation Trilogy", "Ender's Game"]}})
+db.users.updateOne({"name" : "joe"}, {"$unset" : {"favorite book" : 1}})
+
+# Multi-dimensional insert
+var post = {
+    "_id" : ObjectId("4b253b067525f35f94b60a31"),
+    "title" : "A Blog Post",
+    "content" : "...",
+    "author" : {
+        "name" : "joe",
+        "email" : "joe@example.com"
+    }
+}
+db.posts.insertOne(post)
+
+db.posts.updateOne({"author.name" : "joe"}, {"$set" : {"author.name" : "joe schmoe"}})
+
+# This is not correct $set missing: db.posts.updateOne({"author.name" : "joe"}, {"author.name" : "joe schmoe"}) # WRONG!!! IT NEEDS UPDATE OPERATOR
+
+# $inc as an upsert
+db.games.insertOne({"game" : "pinball", "user" : "joe"})
+db.games.updateOne({"game" : "pinball", "user" : "joe"}, {"$inc" : {"score" : 50}}) # field score does not exist, it is created
+db.games.updateOne({"game" : "pinball", "user" : "joe"}, {"$inc" : {"score" : 10000}})
+# Does not work on strings
+db.strcounts.insertOne({"count" : "1"})
+db.strcounts.updateMany({}, {"$inc" : {"count" : 1}})
+
+# ARRAY MANIPULATION
+db.posts.findOne()
+
+db.posts.updateOne({"title" : "A Blog Post"},
+ {"$push" : {"comments" :
+     {"name" : "joe", "email" : "joe@example.com",
+     "content" : "nice post."}}})
+
+printjson(db.posts.findOne())
+db.posts.updateOne({"title" : "A Blog Post"},
+ {"$push" : {"comments" :
+     {"name" : "bob", "email" : "bob@example.com",
+     "content" : "good post."}}})
+printjson(db.posts.findOne())
+
+# Pushing multiple elements in one array with $each 
+db.stocks.insertOne({"_id" : "GOOG"})
+db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly": 561.15}}) # Add the one by one
+db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly": 561.16}})
+# Or more than one with each
+db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly" : {"$each" : [562.776, 562.790, 559.123]}}})
+# Not like this: db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly" : [562.776, 562.790, 559.123]}}) # Will add the array as a single element
+
+# Deleting elements
+db.lists.insertOne({"todo" : ["dishes", "laundry", "dry cleaning"]})
+db.lists.updateOne({}, {"$pull" : {"todo" : "laundry"}}
+
+# Positional array
+db.stocks.updateOne({_id: "GOOG"}, {"$inc": { "hourly.0": 1 } })
+
+# CONDITIONAL ARRAY MANIPULATION
+
+
+# UPSERT
+
+=============================
 
 Cursor:
 for(i=0; i<100; i++) {
