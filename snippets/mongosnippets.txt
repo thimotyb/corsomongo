@@ -18,7 +18,8 @@ mvn -v
 https://www.mongodb.com/docs/manual/tutorial/install-mongodb-on-ubuntu/
 
 cat /etc/issue
-wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+#wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
 sudo apt-get update
 sudo apt-get install -y mongodb-org
 
@@ -129,7 +130,7 @@ joe = db.users.findOne({"name" : "joe", "age" : 20});
 joe.age = joe.age+1
 
  db.users.replaceOne({"name":"joe"}, joe);
- db.people.replaceOne({"_id" : ObjectId("4b2b9f67a1f631733d917a7c")}, joe)
+ db.users.replaceOne({"_id" : ObjectId("4b2b9f67a1f631733d917a7c")}, joe)
 
 
 ### Update operators:
@@ -203,10 +204,13 @@ printjson(db.posts.findOne())
 
 # Pushing multiple elements in one array with $each 
 db.stocks.insertOne({"_id" : "GOOG"})
+db.stocks.insertOne({"_id" : "DAN"})
 db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly": 561.15}}) # Add the one by one
 db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly": 561.16}})
+db.stocks.updateOne({"_id" : "DAN"}, {"$set" : {"hourly": 561.16}})
 # Or more than one with each
 db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly" : {"$each" : [562.776, 562.790, 559.123]}}})
+db.stocks.updateOne({"_id" : "DAN"}, {"$push" : {"hourly" : {"$each" : [562.776, 562.790, 559.123]}}})
 # Not like this: db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly" : [562.776, 562.790, 559.123]}}) # Will add the array as a single element
 
 # Deleting elements
@@ -216,10 +220,154 @@ db.lists.updateOne({}, {"$pull" : {"todo" : "laundry"}}
 # Positional array
 db.stocks.updateOne({_id: "GOOG"}, {"$inc": { "hourly.0": 1 } })
 
+# Slicing
+db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly" : {"$each" : [562.776, 562.790, 559.123, 559.124, 559.125, 559.126], "$slice" : -10 }}})
+# Sorting
+db.stocks.updateOne({"_id" : "GOOG"}, {"$push" : {"hourly" : {"$each" : [562.776, 562.790, 559.123, 559.124, 559.125, 559.126], "$slice" : -10, "$sort" :  -1 }}})
+
+# Treating arrays as Sets ($addToSet)
+var user = {
+    "_id" : ObjectId("4b2d75476cc613d5ee930164"),
+    "username" : "joe",
+    "emails" : [
+        "joe@example.com",
+        "joe@gmail.com",
+        "joe@yahoo.com"
+    ]
+}
+db.users.insertOne(user)
+db.users.findOne({"_id" : ObjectId("4b2d75476cc613d5ee930164")})
+
+db.users.updateOne({"_id" : ObjectId("4b2d75476cc613d5ee930164")}, {"$addToSet" : {"emails" : "joe@gmail.com"}}) # does not insert a new element (already present)
+db.users.updateOne({"_id" : ObjectId("4b2d75476cc613d5ee930164")}, {"$addToSet" : {"emails" : "joe@hotmail.com"}})
+db.users.updateOne({"_id" : ObjectId("4b2d75476cc613d5ee930164")}, {"$addToSet" : {"emails" : {"$each" : ["joe@php.net", "joe@example.com", "joe@python.org"]}}}) # each single element is evaluated for unicity
+
+db.users.updateOne({"_id" : ObjectId("4b2d75476cc613d5ee930164")}, {"$pop" : {"emails" : 1} }) # 1 removes from the end of array, -1 from beginning
+
+# POSITIONAL UPDATES ON ARRAYS
+
+var posts = {
+    "_id" : ObjectId("4b329a216cc613d5ee930192"),
+    "content" : "...",
+    "comments" : [
+        {
+            "comment" : "good post",
+            "author" : "John",
+            "votes" : 0
+        },
+        {
+            "comment" : "i thought it was too short",
+            "author" : "Claire",
+            "votes" : 3
+        },
+        {
+            "comment" : "free watches",
+            "author" : "Alice",
+            "votes" : -5
+        },
+        {
+            "comment" : "vacation getaways",
+            "author" : "Lynn",
+            "votes" : -7
+        }
+    ]
+}
+db.posts.insertOne(posts)
+db.posts.find()
+db.posts.updateOne( {"_id" : ObjectId("4b329a216cc613d5ee930192")} , { "$inc" : { "comments.1.votes" : 1 }  } ) # Increment by position in array
+db.posts.updateOne( {"comments.author" : "John"}, {"$set" : {"comments.$.author" : "Jim"}} ) # Positional operator
+
 # CONDITIONAL ARRAY MANIPULATION
+
+db.posts.updateOne( {"_id" : ObjectId("4b329a216cc613d5ee930192")}, { $set: { "comments.$[elem].hidden" : true } }, {
+     arrayFilters: [ { "elem.votes": { $lte: -5 } } ]
+   })
 
 
 # UPSERT
+db.analytics.find()
+db.analytics.findOne({url : "/blog"})
+
+################## LOGICAL UPSERT CODE (NOT ATOMIC!!!!!)
+#// check if we have an entry for this page
+#blog = db.analytics.findOne({url : "/blog"})
+#// if we do, add one to the number of views and save
+#if (blog) {
+#  blog.pageviews++;
+#  db.analytics.save(blog);
+#}
+#// otherwise, create a new document for this page
+#else {
+#  db.analytics.insertOne({url : "/blog", pageviews : 1})
+#}
+######################################
+
+db.analytics.updateOne({"url" : "/blog"}, {"$inc" : {"pageviews" : 1}}, {"upsert" : true}) # ATOMIC READ AND INSERT IF NOT PRESENT
+db.analytics.updateOne({"url" : "/blog"}, {"$inc" : {"pageviews" : 1}}, {"upsert" : true}) # READ AND INCREMENT (UPDATE)
+
+=============================
+READ
+
+ db.movies.find({ title: /Indiana Jones/, runtime: 118 })
+ db.movies.find({ title: /Indiana Jones/, runtime: 118 },{ title:1, year: 1 })
+
+ db.movies.find({"runtime": { "$gte" : 120, "$lte" : 150 } })
+ 
+ start = new Date("01/01/2000")
+ db.movies.find({"released": { "$gt" : start } }, { title:1, released:1, _id:0 })
+
+db.users.find()
+db.users.find({"sex":{"$ne": "male"}})
+
+####  db.posts.find({"title" : { "$in" : [ "My Adventure", "A Blog Post"]}}) ### CHECK THIS ONE
+
+db.movies.find({"$or": [ {"year": 1943}, {"rated": "NOT RATED"} ]})
+
+# QUERY ON ARRAYS
+
+db.food.insertOne({"fruit" : ["apple", "banana", "peach"]})
+db.food.find({"fruit" : "banana"}) # This matches the document!!!
+
+# Using $all
+db.food.insertOne({"_id" : 1, "fruit" : ["apple", "banana", "peach"]})
+db.food.insertOne({"_id" : 2, "fruit" : ["apple", "kumquat", "orange"]})
+db.food.insertOne({"_id" : 3, "fruit" : ["cherry", "banana", "apple"]})
+db.food.find( {fruit: { $all: ["apple", "banana" ]  } } )
+
+db.food.find( {fruit: ["apple", "banana", "peach" ] } ) # Array exact search
+db.food.find( {fruit: ["apple", "banana" ]  } ) # This will not find anything
+
+db.food.find( { "fruit.2": "peach" } ) # Positional search
+db.food.find({"fruit" : { $size: 3 } } )
+
+# Slicing on read
+db.stocks.findOne({ _id: 'GOOG' }, {"hourly": { "$slice": 2 } }) # First two
+db.stocks.findOne({ _id: 'GOOG' }, {"hourly": { "$slice": -2 } }) # Last two
+db.stocks.findOne({ _id: 'GOOG' }, {"hourly": { "$slice": [1,4] } }) # Beginning from the second element for a total of four elements
+
+# elemMatch
+
+var post = {
+    "content" : "...",
+    "comments" : [
+        {
+            "author" : "joe",
+            "score" : 3,
+            "comment" : "nice post"
+        },
+        {
+            "author" : "mary",
+            "score" : 6,
+            "comment" : "terrible post"
+        }
+    ]
+}
+db.posts.insertOne(post)
+
+ db.posts.find({"comments" : {"author" : "joe", "score" : {"$gte" : 2}}}) # This will not work
+ db.posts.find({"comments" : {"$elemMatch" : {"author" : "joe", "score" : {"$gte" : 2}}}})
+
+Operators: https://www.mongodb.com/docs/manual/reference/operator/query/
 
 =============================
 
@@ -233,6 +381,11 @@ cursor.forEach(function(j) {
     print(j.x*2);
  });
  
+db.mytest.find().limit(5)
+db.mytest.find().skip(3)
+db.mytest.find().skip(3).limit(5)
+db.mytest.find().skip(3).limit(5).sort({ "x": -1 }) # sorts first
+
 =====================
 
 INDEXES
@@ -684,3 +837,13 @@ db.settings.updateOne(
 )
 
 db.adminCommand( { balancerCollectionStatus: "accounts.users" } )
+
+
+================
+
+Reactive Mongo
+
+mongodb+srv://m001-student:m001-mongodb-basics@cluster0.uuo3cgl.mongodb.net/test
+https://github.com/thimotyb/spring-reactive-sample/tree/master/boot-data-mongo
+
+
