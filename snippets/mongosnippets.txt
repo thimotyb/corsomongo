@@ -843,7 +843,7 @@ db.adminCommand( { balancerCollectionStatus: "accounts.users" } )
 
 Reactive Mongo
 
-mongodb+srv://m001-student:m001-mongodb-basics@cluster0.uuo3cgl.mongodb.net/test
+mongodb+srv://m001-student:secret@cluster0.uuo3cgl.mongodb.net/test
 https://github.com/thimotyb/spring-reactive-sample/tree/master/boot-data-mongo
 
 
