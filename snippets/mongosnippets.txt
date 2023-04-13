@@ -340,6 +340,11 @@ db.food.find( {fruit: ["apple", "banana" ]  } ) # This will not find anything
 db.food.find( { "fruit.2": "peach" } ) # Positional search
 db.food.find({"fruit" : { $size: 3 } } )
 
+# Positional operator
+
+ db.posts.find({"comments.author": "joe"}) # All array elements
+ db.posts.find({"comments.author": "joe"}, { "comments.$": 1 } ) # Only array elements (position unknown) that match
+
 # Slicing on read
 db.stocks.findOne({ _id: 'GOOG' }, {"hourly": { "$slice": 2 } }) # First two
 db.stocks.findOne({ _id: 'GOOG' }, {"hourly": { "$slice": -2 } }) # Last two
@@ -364,8 +369,11 @@ var post = {
 }
 db.posts.insertOne(post)
 
- db.posts.find({"comments" : {"author" : "joe", "score" : {"$gte" : 2}}}) # This will not work
- db.posts.find({"comments" : {"$elemMatch" : {"author" : "joe", "score" : {"$gte" : 2}}}})
+db.posts.find({"comments" : {"author" : "joe", "score" : {"$gte" : 2}}}) # This will not work
+db.posts.find({"comments" : {"$elemMatch" : {"author" : "joe", "score" : {"$gte" : 2}}}}) # This matches
+db.posts.find({"comments" : {"$elemMatch" : {"author" : "joe", "score" : {"$gte" : 5}}}}) # This does not match because joes' score is 3
+  
+db.posts.find({"comments" : {"$elemMatch" : {"author" : "joe", "score" : {"$gte" : 2}}}}, { "comments.$": 1} ) # This returns only the elements that match in the array in the document
 
 Operators: https://www.mongodb.com/docs/manual/reference/operator/query/
 
@@ -483,6 +491,86 @@ db.createCollection("my_collection", {"capped" : true, "size" : 100000});
 // 24-hour timeout
 db.sessions.createIndex({"lastUpdated" : 1}, {"expireAfterSeconds" : 60*60*24})
 
+
+///////////////////////////////
+// AGGREGATION FW (ON PREM)
+////////////////////////////////
+
+db.orders.insertMany( [
+   { _id: 0, name: "Pepperoni", size: "small", price: 19,
+     quantity: 10, date: ISODate( "2021-03-13T08:14:30Z" ) },
+   { _id: 1, name: "Pepperoni", size: "medium", price: 20,
+     quantity: 20, date : ISODate( "2021-03-13T09:13:24Z" ) },
+   { _id: 2, name: "Pepperoni", size: "large", price: 21,
+     quantity: 30, date : ISODate( "2021-03-17T09:22:12Z" ) },
+   { _id: 3, name: "Cheese", size: "small", price: 12,
+     quantity: 15, date : ISODate( "2021-03-13T11:21:39.736Z" ) },
+   { _id: 4, name: "Cheese", size: "medium", price: 13,
+     quantity:50, date : ISODate( "2022-01-12T21:23:13.331Z" ) },
+   { _id: 5, name: "Cheese", size: "large", price: 14,
+     quantity: 10, date : ISODate( "2022-01-12T05:08:13Z" ) },
+   { _id: 6, name: "Vegan", size: "small", price: 17,
+     quantity: 10, date : ISODate( "2021-01-13T05:08:13Z" ) },
+   { _id: 7, name: "Vegan", size: "medium", price: 18,
+     quantity: 10, date : ISODate( "2021-01-13T05:10:13Z" ) }
+] )
+
+==============
+
+db.orders.aggregate( [
+
+   // Stage 1: Filter pizza order documents by pizza size
+   {
+      $match: { size: "medium" }
+   },
+
+   // Stage 2: Group remaining documents by pizza name and calculate total quantity
+   {
+      $group: { _id: "$name", totalQuantity: { $sum: "$quantity" } }
+   }
+
+] )
+
+=============
+
+db.orders.aggregate( [
+
+   // Stage 1: Filter pizza order documents by date range
+   {
+      $match:
+      {
+         "date": { $gte: new ISODate( "2020-01-30" ), $lt: new ISODate( "2022-01-30" ) }
+      }
+   },
+
+   // Stage 2: Group remaining documents by date and calculate results
+   {
+      $group:
+      {
+         _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+         totalOrderValue: { $sum: { $multiply: [ "$price", "$quantity" ] } },
+         averageOrderQuantity: { $avg: "$quantity" }
+      }
+   },
+
+   // Stage 3: Sort documents by totalOrderValue in descending order
+   {
+      $sort: { totalOrderValue: -1 }
+   }
+
+ ] )
+ 
+ https://www.mongodb.com/docs/manual/meta/aggregation-quick-reference/
+ 
+ https://www.mongodb.com/docs/manual/reference/operator/aggregation/group/#std-label-accumulators-group
+ 
+ https://www.mongodb.com/docs/manual/meta/aggregation-quick-reference/#std-label-aggregation-expressions
+ 
+ https://www.mongodb.com/docs/manual/reference/operator/aggregation/#std-label-aggregation-expression-operators
+ 
+ 
+==================
+
 /////////////////////////
 // AGGREGATION FW (on Atlas)
 /////////////////////////
@@ -526,6 +614,8 @@ db.companies.aggregate([
     name: 1}},
 ])
 
+db.companies.aggregate( [ { $group: { _id: "$founded_year", "totdip": { "$sum": "$number_of_employees" } } } ] )
+
 db.companies.aggregate([
   {$match: {"funding_rounds.investments.financial_org.permalink": "greylock" }},
   {$project: {
@@ -534,7 +624,7 @@ db.companies.aggregate([
     ipo: "$ipo.pub_year",
     valuation: "$ipo.valuation_amount",
     funders: "$funding_rounds.investments.financial_org.permalink"
-  }}
+  }},{$limit: 1}
 ]).pretty()
 
  // UNWIND
@@ -545,7 +635,19 @@ db.companies.aggregate([
     name: 1,
     amount: "$funding_rounds.raised_amount",
     year: "$funding_rounds.funded_year"
-  }}
+  }},{$limit: 1}
+])
+
+# Unwind on the 11 funding years of FB
+db.companies.aggregate([
+  { $match: {"funding_rounds.investments.financial_org.permalink": "greylock"} },
+  { $unwind: "$funding_rounds" },
+  { $project: {
+    _id: 0,
+    name: 1,
+    amount: "$funding_rounds.raised_amount",
+    year: "$funding_rounds.funded_year"
+  } },{$limit: 11}
 ])
 
 db.companies.aggregate([
@@ -556,7 +658,7 @@ db.companies.aggregate([
     name: 1,
     amount: "$funding_rounds.raised_amount",
     year: "$funding_rounds.funded_year"
-  } }
+  } },{$limit: 15}
 ])
  
 # financial org needs to be filtered
@@ -569,7 +671,7 @@ db.companies.aggregate([
     funder: "$funding_rounds.investments.financial_org.permalink",
     amount: "$funding_rounds.raised_amount",
     year: "$funding_rounds.funded_year"
-  } }
+  } },{$limit: 15}
 ])
 
 # Match after unwind to solve the problem
@@ -584,7 +686,7 @@ db.companies.aggregate([
     fundingOrganization: "$funding_rounds.investments.financial_org.permalink",
     amount: "$funding_rounds.raised_amount",
     year: "$funding_rounds.funded_year"
-  } }
+  } },{$limit: 10}
 ])
 
 # Array expressions - Filtering
@@ -600,6 +702,7 @@ db.companies.aggregate([
       cond: { $gte: ["$$round.raised_amount", 100000000] } } }
   } },
   { $match: {"rounds.investments.financial_org.permalink": "greylock" } },
+  {$limit: 1}
 ]).pretty()
 
 # position ElemAt, Slice
@@ -635,6 +738,8 @@ db.companies.aggregate([
     largest_round: { $max: "$funding_rounds.raised_amount" }
   } }
 ])
+
+# Trovare le top 10 aziende che hanno avuto il funding round più alto in assoluto
 
 db.companies.aggregate([
   { $match: { "funding_rounds": { $exists: true, $ne: [ ]} } },
