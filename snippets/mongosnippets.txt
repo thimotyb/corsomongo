@@ -398,7 +398,18 @@ db.mytest.find().skip(3).limit(5).sort({ "x": -1 }) # sorts first
 
 INDEXES
 
-for (i=0; i<1000000; i++) {
+db.users.find({"age" : 21}).sort({"username" : -1})
+
+Example of Index Structure
+[20 ....]
+[21, "user100154"] -> 8623530928
+[21, "user100266"] -> 8623545264
+[21, "user100270"] -> 8623545776
+[21, "user100285"] -> 8623547696
+[21, "user100349"] -> 8623555888
+[22 .... ]
+
+for (i=0; i<100000; i++) {
      db.users.insertOne(
          {
               "i" : i, 
@@ -415,6 +426,7 @@ db.users.createIndex({"username" : 1})
 db.users.find({"username": "user101"}).explain("executionStats")
 db.users.find({"username": "user999999"}).explain("executionStats")
 db.users.find().sort({"age" : 1, "username" : 1}) # Needs a compound index to workd
+db.users.find().sort({"age" : 1, "username" : 1}).explain("executionStats")
 db.users.createIndex({"age" : 1, "username" : 1})
 db.users.createIndex({"username" : 1, "age": 1})
 db.users.find({}, {"_id" : 0, "i" : 0, "created" : 0})
@@ -437,7 +449,7 @@ db.restaurants.createIndex({'address.coord':"2dsphere"})
 
 db.neighborhoods.find({name: "Clinton"})
 db.restaurants.find({name: "Little Pie Company"})
-db.neighborhoods.findOne({geometry:{$geoIntersects:{$geometry:{type:"Point", coordinates:[-73.93414657,40.82302903]}}}})
+db.neighborhoods.findOne({geometry:{$geoIntersects:{$geometry:{type:"Point", coordinates:[-73.93414657,40.82302903]}}}},{name:1})
 
 var neighborhood = db.neighborhoods.findOne({
   geometry: {
@@ -802,12 +814,175 @@ db.companies.aggregate([
 
 # Writing aggregation results 
 
+https://www.mongodb.com/docs/manual/reference/operator/aggregation/out/
+
+
+db.companies.aggregate([
+  { $match: { "funding_rounds": { $exists: true, $ne: [ ]} } },
+  { $project: {
+    _id: 0,
+    name: 1,
+    largest_round: { $max: "$funding_rounds.raised_amount" }
+  } },
+  { $out : "max_fund_rounds" }
+])
+
+show collections
+
+https://www.mongodb.com/docs/manual/reference/operator/aggregation/merge/
+https://www.mongodb.com/docs/manual/core/materialized-views/
+
+# Important to use as _id something "stable" such as company name to perform merging when source data updates
+db.companies.aggregate([
+  { $match: { "funding_rounds": { $exists: true, $ne: [ ]} } },
+  { $project: {
+    _id: "$name",
+    largest_round: { $max: "$funding_rounds.raised_amount" }
+  } },
+  { $merge : { into : "mater_view_funding_companies", on: "_id" } }
+])
+
+=============================
+
+JOIN CON $lookup
+
+db.orders.insertMany( [
+   { "_id" : 1, "item" : "almonds", "price" : 12, "quantity" : 2 },
+   { "_id" : 2, "item" : "pecans", "price" : 20, "quantity" : 1 },
+   { "_id" : 3  }
+] )
+
+db.inventory.insertMany( [
+   { "_id" : 1, "sku" : "almonds", "description": "product 1", "instock" : 120 },
+   { "_id" : 2, "sku" : "bread", "description": "product 2", "instock" : 80 },
+   { "_id" : 3, "sku" : "cashews", "description": "product 3", "instock" : 60 },
+   { "_id" : 4, "sku" : "pecans", "description": "product 4", "instock" : 70 },
+   { "_id" : 5, "sku": null, "description": "Incomplete" },
+   { "_id" : 6 }
+] )
+
+db.orders.aggregate( [
+   {
+     $lookup:
+       {
+         from: "inventory",
+         localField: "item",
+         foreignField: "sku",
+         as: "inventory_docs"
+       }
+  }
+] )
+
+============================
+SCHEMA VALIDATION
+https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/#std-label-schema-validation-json
+https://json-schema.org/
+
+db.createCollection("students", {
+   validator: {
+      $jsonSchema: {
+         bsonType: "object",
+         title: "Student Object Validation",
+         required: [ "address", "major", "name", "year" ],
+         properties: {
+            name: {
+               bsonType: "string",
+               description: "'name' must be a string and is required"
+            },
+            year: {
+               bsonType: "int",
+               minimum: 2017,
+               maximum: 3017,
+               description: "'year' must be an integer in [ 2017, 3017 ] and is required"
+            },
+            gpa: {
+               bsonType: [ "double" ],
+               description: "'gpa' must be a double if the field exists"
+            }
+         }
+      }
+   }
+} )
+
+# This fails bcause gpa not double
+db.students.insertOne( {
+   name: "Alice",
+   year: Int32( 2019 ),
+   major: "History",
+   gpa: Int32(3),
+   address: {
+      city: "NYC",
+      street: "33rd Street"
+   }
+} )
+
+# Without name
+db.students.insertOne( {
+   year: Int32( 2019 ),
+   major: "History",
+   gpa: Int32(3),
+   address: {
+      city: "NYC",
+      street: "33rd Street"
+   }
+} )
+
+
+# This is a valid document
+db.students.insertOne( {
+   name: "Alice",
+   year: NumberInt(2019),
+   major: "History",
+   gpa: Double(3.0),
+   address: {
+      city: "NYC",
+      street: "33rd Street"
+   }
+} )
+
+===========================
+
+TRANSACTION (USE ON A RS)
+
+db.getSiblingDB("mydb1").foo.insertOne(
+    {abc: 0},
+    { writeConcern: { w: "majority", wtimeout: 2000 } }
+)
+db.getSiblingDB("mydb2").bar.insertOne(
+   {xyz: 0},
+   { writeConcern: { w: "majority", wtimeout: 2000 } }
+)
+
+session = db.getMongo().startSession( { readPreference: { mode: "primary" } } );
+coll1 = session.getDatabase("mydb1").foo;
+coll2 = session.getDatabase("mydb2").bar;
+
+// Start a transaction
+session.startTransaction( { readConcern: { level: "local" }, writeConcern: { w: "majority" } } );
+
+try {
+   coll1.insertOne( { abc: 1 } );
+   coll2.insertOne( { xyz: 999 } );
+} catch (error) {
+   // Abort transaction on error
+   session.abortTransaction();
+   throw error;
+}
+
+// Commit the transaction using write concern set at transaction start
+session.commitTransaction();
+
+session.endSession();
+
 ============================
 
 CREATE LOCAL REPLICA SET
 
 tmux
 https://tmuxcheatsheet.com/
+
+Ctrl-B "
+Ctrl-B (up/down)
 
 mkdir -p ~/data/rs{1,2,3}
 sudo mongod --replSet rsExample --dbpath ~/data/rs1 --port 27017 --oplogSize 200
