@@ -29,6 +29,9 @@ sudo mkdir /data/db
 On WSL2 cannot start as service:
 sudo mongod&
 
+# Start service
+sudo service mongod start
+
 ======================
 
 cd /home/azureuser
